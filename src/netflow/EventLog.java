@@ -1,65 +1,59 @@
 package netflow;
 
-// Doubly Linked List - global log of simulation events, supports forward and backward reading
+// DS #5 - Doubly Linked List
+// saves every event; can be read forward or backward
 public class EventLog {
 
-    private static class LogNode {
-        String message;
-        LogNode next;
-        LogNode prev;
+    private static class EventNode {
+        String    message;
+        EventNode next; // newer event
+        EventNode prev; // older event
 
-        LogNode(String message) {
+        EventNode(String message) {
             this.message = message;
-            this.next = null;
-            this.prev = null;
         }
     }
 
-    private LogNode head;
-    private LogNode tail;
+    private EventNode head; // oldest entry
+    private EventNode tail; // newest entry
     private int count;
 
-    public EventLog() {
-        head = null;
-        tail = null;
-        count = 0;
-    }
-
     public void addEvent(String message) {
-        LogNode newNode = new LogNode(message);
+        EventNode node = new EventNode(message);
         if (tail == null) {
-            head = newNode;
-            tail = newNode;
+            head = node;
+            tail = node;
         } else {
-            newNode.prev = tail;
-            tail.next = newNode;
-            tail = newNode;
+            // link new node to tail, then move tail forward
+            node.prev  = tail;
+            tail.next  = node;
+            tail       = node;
         }
         count++;
     }
 
-    // oldest to newest
+    // traverse using .next pointer (oldest to newest)
     public void printForward() {
-        System.out.println("\n--- Event Log (Oldest to Newest) ---");
-        LogNode current = head;
+        System.out.println("\n-- EVENT LOG (Oldest to Newest) --");
+        EventNode current = head;
         int i = 1;
         while (current != null) {
-            System.out.println("[" + i + "] " + current.message);
+            System.out.println("[" + i++ + "] " + current.message);
             current = current.next;
-            i++;
         }
+        System.out.println("----------------------------------");
     }
 
-    // newest to oldest
+    // traverse using .prev pointer (newest to oldest) - only possible in doubly LL
     public void printBackward() {
-        System.out.println("\n--- Event Log (Newest to Oldest) ---");
-        LogNode current = tail;
+        System.out.println("\n-- EVENT LOG (Newest to Oldest) --");
+        EventNode current = tail;
         int i = count;
         while (current != null) {
-            System.out.println("[" + i + "] " + current.message);
+            System.out.println("[" + i-- + "] " + current.message);
             current = current.prev;
-            i--;
         }
+        System.out.println("----------------------------------");
     }
 
     public int getCount() { return count; }

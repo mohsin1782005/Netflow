@@ -3,125 +3,123 @@ package netflow;
 import java.util.HashMap;
 import java.util.ArrayList;
 
+// DS #3 - HashMap as routing table (O(1) lookup)
 public class Network {
 
-    public HashMap<String, RouterBuffer> routers;
-    public HashMap<String, String> routingTable;
-    public ArrayList<String> routerIds;
-    private EventLog eventLog;
-    public int linearSearchCount = 0;
+    public HashMap<String, RouterQueue> routers;
+    public HashMap<String, String>      routingTable;
+    public ArrayList<String>            routerIds;
+    private EventLog                    eventLog;
 
     public Network(EventLog eventLog) {
-        this.eventLog = eventLog;
-        this.routers = new HashMap<>();
+        this.eventLog     = eventLog;
+        this.routers      = new HashMap<>();
         this.routingTable = new HashMap<>();
-        this.routerIds = new ArrayList<>();
-        buildNetwork();
+        this.routerIds    = new ArrayList<>();
+        setupRouters();
     }
 
-    private void buildNetwork() {
+    private void setupRouters() {
         String[] ids = {"Router-A", "Router-B", "Router-C", "Router-D", "Router-E"};
         for (String id : ids) {
-            routers.put(id, new RouterBuffer(id, 5));
+            routers.put(id, new RouterQueue(id, 5));
             routerIds.add(id);
         }
 
-        // HashMap routing table: destination -> next hop
+        // routing rules - stored in HashMap for O(1) access
         routingTable.put("Router-A", "Router-B");
         routingTable.put("Router-B", "Router-D");
         routingTable.put("Router-C", "Router-E");
         routingTable.put("Router-D", "Router-E");
         routingTable.put("Router-E", "Router-A");
 
-        eventLog.addEvent("Network initialized with 5 routers");
+        eventLog.addEvent("Network ready: 5 routers set up");
     }
 
-    // routes a packet hop by hop; uses recursive backtracking if a buffer is full
-    public void routePacket(Packet packet, String currentRouterId,
-                            ArrayList<String> visited, int depth) {
+    // sends packet hop by hop using HashMap lookup + recursive backtracking
+    public void sendPacket(Packet packet, String currentRouter,
+                           ArrayList<String> visited, int depth) {
 
+        // safety limit to stop infinite recursion
         if (depth > 10) {
-            packet.status = "DROPPED";
-            packet.travelTimeMs = System.currentTimeMillis() - packet.createdAtMs;
-            eventLog.addEvent("DROPPED (depth limit): " + packet.packetId);
-            System.out.println("  DROPPED (depth limit): " + packet.packetId);
+            packet.status      = "DROPPED";
+            packet.timeTakenMs = System.currentTimeMillis() - packet.startTimeMs;
+            eventLog.addEvent("DROPPED [too many hops] " + packet.packetId);
+            System.out.println("  DROPPED (too deep): " + packet.packetId);
             return;
         }
 
-        if (currentRouterId.equals(packet.destination)) {
-            // simulate header decapsulation using a stack
-            PacketStack stack = new PacketStack();
-            String[] trail = packet.auditTrail.getTrail().split(" -> ");
-            for (String hop : trail) stack.push("HDR:" + hop);
-            System.out.print("  Decapsulating: ");
+        // packet reached its destination
+        if (currentRouter.equals(packet.destination)) {
+
+            // DS #2 - Stack: push all routers visited, then pop in reverse (decapsulation)
+            HeaderStack stack = new HeaderStack();
+            for (String r : packet.pathRecord.getPath().split(" -> ")) stack.push(r);
+            System.out.print("  Removing headers: ");
             while (!stack.isEmpty()) System.out.print(stack.pop() + " ");
             System.out.println();
 
-            packet.status = "DELIVERED";
-            packet.travelTimeMs = System.currentTimeMillis() - packet.createdAtMs;
+            packet.status      = "DELIVERED";
+            packet.timeTakenMs = System.currentTimeMillis() - packet.startTimeMs;
             eventLog.addEvent("DELIVERED " + packet.packetId
-                    + " in " + packet.travelTimeMs + "ms | Hops: " + packet.hopCount
-                    + " | Trail: " + packet.auditTrail.getTrail());
-            System.out.println("  Delivered: " + packet.packetId
-                    + " (" + packet.hopCount + " hops, " + packet.travelTimeMs + "ms)");
+                    + " | routers passed: " + packet.routersPassed
+                    + " | path: " + packet.pathRecord.getPath());
+            System.out.println("  DELIVERED: " + packet.packetId
+                    + " (" + packet.routersPassed + " routers, " + packet.timeTakenMs + "ms)");
             return;
         }
 
-        // HashMap lookup O(1)
-        String nextHop = routingTable.get(currentRouterId);
+        // HashMap O(1) lookup - find which router to go to next
+        String nextRouter = routingTable.get(currentRouter);
 
-        if (nextHop == null) {
-            packet.status = "DROPPED";
-            packet.travelTimeMs = System.currentTimeMillis() - packet.createdAtMs;
-            eventLog.addEvent("DROPPED (no route): " + packet.packetId);
-            System.out.println("  DROPPED (no route): " + packet.packetId);
+        if (nextRouter == null) {
+            packet.status      = "DROPPED";
+            packet.timeTakenMs = System.currentTimeMillis() - packet.startTimeMs;
+            eventLog.addEvent("DROPPED [no path] " + packet.packetId);
+            System.out.println("  DROPPED (no path): " + packet.packetId);
             return;
         }
 
-        RouterBuffer nextBuffer = routers.get(nextHop);
+        RouterQueue nextQueue = routers.get(nextRouter);
 
-        if (nextBuffer.isFull()) {
+        if (nextQueue.isFull()) {
             // buffer full - try another router recursively
-            System.out.println("  Buffer full at " + nextHop + " - backtracking for " + packet.packetId);
-            eventLog.addEvent("OVERFLOW at " + nextHop + " for " + packet.packetId);
-            visited.add(currentRouterId);
+            System.out.println("  Buffer full at " + nextRouter + " - trying another...");
+            eventLog.addEvent("OVERFLOW at " + nextRouter + " for " + packet.packetId);
+            visited.add(currentRouter);
 
-            for (String altRouter : routerIds) {
-                if (!visited.contains(altRouter)
-                        && !altRouter.equals(packet.destination)
-                        && !routers.get(altRouter).isFull()) {
-                    packet.auditTrail.addHop(altRouter);
-                    packet.hopCount++;
-                    System.out.println("  Rerouting via " + altRouter);
-                    routePacket(packet, altRouter, visited, depth + 1);
+            for (String alt : routerIds) {
+                if (!visited.contains(alt) && !alt.equals(packet.destination)
+                        && !routers.get(alt).isFull()) {
+                    packet.pathRecord.addRouter(alt);
+                    packet.routersPassed++;
+                    System.out.println("  Rerouting via " + alt);
+                    sendPacket(packet, alt, visited, depth + 1); // recursive call
                     return;
                 }
             }
 
-            // no alternative found
-            packet.status = "DROPPED";
-            packet.travelTimeMs = System.currentTimeMillis() - packet.createdAtMs;
-            eventLog.addEvent("DROPPED (all buffers full): " + packet.packetId);
+            packet.status      = "DROPPED";
+            packet.timeTakenMs = System.currentTimeMillis() - packet.startTimeMs;
+            eventLog.addEvent("DROPPED [all full] " + packet.packetId);
             System.out.println("  DROPPED (all full): " + packet.packetId);
 
         } else {
-            nextBuffer.enqueue(packet);
-            packet.auditTrail.addHop(nextHop);
-            packet.hopCount++;
-            System.out.println("  " + packet.packetId + " -> " + nextHop
-                    + " [" + nextBuffer.getCount() + "/" + nextBuffer.getCapacity() + "]");
-            nextBuffer.dequeue();
-            routePacket(packet, nextHop, visited, depth + 1);
+            // normal flow - add to queue then move forward
+            nextQueue.addToBuffer(packet);
+            packet.pathRecord.addRouter(nextRouter);
+            packet.routersPassed++;
+            System.out.println("  " + packet.packetId + " -> " + nextRouter
+                    + " [" + nextQueue.getCount() + "/" + nextQueue.getCapacity() + "]");
+            nextQueue.removeFromBuffer();
+            sendPacket(packet, nextRouter, visited, depth + 1); // recursive call
         }
     }
 
-    // linear search through routing table - used in report to compare with HashMap
-    public String linearSearchRoute(String currentRouterId) {
-        linearSearchCount++;
+    // O(n) slow search - only used to compare speed with HashMap in report
+    public String slowSearch(String routerId) {
         for (String key : routingTable.keySet()) {
-            if (key.equals(currentRouterId)) {
-                return routingTable.get(key);
-            }
+            if (key.equals(routerId)) return routingTable.get(key);
         }
         return null;
     }
